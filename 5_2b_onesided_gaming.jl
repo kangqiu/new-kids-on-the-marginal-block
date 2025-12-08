@@ -23,13 +23,13 @@ gencos_costs[3, :, :] = genco3_cost
 # -----------------------------
 # Set parameters
 # -----------------------------
-k = 3                       #gaming genco
+k = 2                         #gaming genco
 D = 145                     #demand
 ngu =1                      #generating units per genco
 ng = length(GenCos)
 nb = fill(3, ngu)
 
-α = 200.0        # upper bound on λ
+α = 9       # upper bound on λ
 L = 1e3          # Big-M for linearization
 
 
@@ -251,6 +251,7 @@ non_gaming = setdiff(1:ng, [k])
 
 @objective(gaming_model, Max, pr_k)
 
+unset_silent(gaming_model)
 optimize!(gaming_model)
 
 ts = termination_status(gaming_model)
@@ -292,3 +293,13 @@ for j in 1:ng
     end
     println("Dispatch GenCo $j = ", dispatch[j], " | Profit GenCo $j = ", profit[j])
 end
+
+
+"""
+Varying the price cap α
+
+- For each gaming GenCo, the price cap needs to be set higher than the most expensive true ic of the other GenCos
+- If the α is lower, this leads to infeasibilities
+- Specifically because of constraint (40)
+
+"""
