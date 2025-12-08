@@ -1,11 +1,11 @@
 using JuMP 
 using HiGHS
 using NamedArrays
+using Ipopt
 
 
 GenCos = ["GenCo1", "GenCo2", "GenCo3"]
 blocks = [1, 2, 3]
-demand = 145
 
 marginal_cost = NamedArray(
     [1 4 6;
@@ -58,33 +58,76 @@ println(" Market clearing under perfect competition")
 println(" Demand = $(demand) MW")
 println("=======================================\n")
 
-model = Model(HiGHS.Optimizer)
-set_silent(model)
+
+
+# ----- elasticity parameters -----
+ε  = -0.05
+D0 = 145
+λ0 = 3
+
+max_iter = 50
+tol = 1e-3
+
+demand = D0    # initial guess
+
+# Update the RHS of the demand constraint
+mdl = Model(HiGHS.Optimizer)
+set_silent(mdl)
 
 # decision variable q_ib (with boundary constraint)
-@variable(model, 0 <= x[g in GenCos, b in blocks] <= gen_capacity[g,b])
+@variable(mdl, 0 <= x[g in GenCos, b in blocks] <= gen_capacity[g,b])
 
 # demand balance
-demand_constr = @constraint(model,sum(x[g,b] for g in GenCos, b in blocks) == demand)
+demand_constr = @constraint(mdl,sum(x[g,b] for g in GenCos, b in blocks) == demand)
 
 # total cost
-@objective(model, Min,sum(marginal_cost[g,b] * x[g,b] for g in GenCos, b in blocks))
+@objective(mdl, Min,sum(marginal_cost[g,b] * x[g,b] for g in GenCos, b in blocks))
 
-optimize!(model)
 
-ts = termination_status(model)
-ps = primal_status(model)
-ds = dual_status(model)
-if termination_status(model) == MOI.OPTIMAL
+for iter in 1:max_iter
+
+    if iter == 1
+        global λ_prev = λ0
+    end
+    
+
+    optimize!(mdl)
+    
+    λ = dual(demand_constr)
+    
+    # Update demand from price elasticity
+    #new_demand = D0 * (λ / λ0)^ε
+    new_demand = normalized_rhs(demand_constr) * (1 - ε*(λ - λ_prev))
+    
+
+    println("Iter=$iter   λ=$(round(λ,digits=3))   Demand=$(round(normalized_rhs(demand_constr),digits=3))     New Demand=$(round(new_demand,digits=3))")
+    
+    
+    if abs(new_demand - normalized_rhs(demand_constr)) < tol
+        println("Converged.")
+        break
+    end
+
+    if iter < max_iter
+        set_normalized_rhs(demand_constr, new_demand)
+        λ_prev = λ
+    end
+
+end
+
+ts = termination_status(mdl)
+ps = primal_status(mdl)
+ds = dual_status(mdl)
+if termination_status(mdl) == MOI.OPTIMAL
     println("Termination Status: $ts.")
     println("Primal status: $ps")
     println("Dual status: $ds")
-elseif termination_status(model) == MOI.INFEASIBLE_OR_UNBOUNDED
+elseif termination_status(mdl) == MOI.INFEASIBLE_OR_UNBOUNDED
     println("Problem infeasible or unbounded.")
 end
 
-total_cost = objective_value(model)
-clearing_price = JuMP.dual(demand_constr)
+total_cost = objective_value(mdl)
+clearing_price = dual(demand_constr)
 
 # Compute dispatch, revenues, costs, profits
 dispatch_by_gen = Dict(g => sum(value(x[g,b]) for b in blocks) for g in GenCos)
@@ -94,7 +137,8 @@ profits = Dict(g => revenues[g] - costs[g] for g in GenCos)
 
 # Print results
 println("\nTotal procurement cost (objective): ", round(total_cost, digits=4), " €")
-println("Market clearing price: ", round(clearing_price, digits=4), " €/MWh\n")
+println("Market clearing price: ", round(clearing_price, digits=4), " €/MWh")
+println("New Demand = ", round(normalized_rhs(demand_constr), digits=4), " MW\n")
 
 println("Dispatch by GenCo:")
 for g in GenCos
