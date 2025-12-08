@@ -186,5 +186,6 @@ g = value.(model[:g])
 v_min = value.(model[:vᵐᶦⁿ])
 v_max = value.(model[:vᵐᵃˣ])
 
-#query marginal generation block 
-i = findall(v_min .≤ 1e-7 .& v_max .≤ 1e-7)
+
+value.(model[:g]) 
+value.(model[:Δg])
